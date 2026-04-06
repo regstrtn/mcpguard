@@ -1,0 +1,134 @@
+# mcpguard default policy
+# Sensible defaults for any development environment.
+# Blocks known-dangerous patterns while allowing normal development work.
+
+version: "1"
+default_action: ALLOW
+
+policies:
+  # ── Shell security ──────────────────────────────────────────────────
+  - name: block-destructive-shell
+    description: "Block destructive shell commands"
+    priority: 100
+    tools:
+      - "run_command"
+      - "shell_.*"
+      - "execute_command"
+    action: DENY
+    rules:
+      - argument: command
+        pattern: "rm\\s+-rf\\s+/|mkfs|dd\\s+if=|shutdown|reboot|init\\s+0|:(){ :|:& };:|curl\\s+.*?\\|\\s*(bash|sh|python)|wget\\s+.*?\\|\\s*(bash|sh|python)|nc\\s+-[ec]\\s+|python\\s+-c.*?(import\\s+pty|import\\s+socket)"
+        message: "Destructive command blocked"
+
+  - name: block-privilege-escalation
+    description: "Block privilege escalation attempts"
+    priority: 99
+    tools:
+      - "run_command"
+      - "shell_.*"
+      - "execute_command"
+    action: DENY
+    rules:
+      - argument: command
+        contains:
+          - "chmod 777"
+          - "chown root"
+          - "passwd"
+          - "visudo"
+        message: "Privilege escalation blocked"
+
+  # ── File system security ────────────────────────────────────────────
+  - name: block-unsafe-file-write
+    description: "Block writing files outside workspace"
+    priority: 95
+    tools:
+      - "write_file"
+      - "write_to_file"
+      - "create_file"
+      - "replace_file_content"
+    action: DENY
+    rules:
+      - argument: path
+        pattern: "\\.\\./"
+        message: "Writing outside workspace blocked"
+
+  - name: block-sensitive-file-read
+    description: "Block reading sensitive files"
+    priority: 90
+    tools:
+      - "read_file"
+      - "view_file"
+      - "cat"
+    action: DENY
+    rules:
+      - argument: path
+        pattern: "\\.ssh/|id_rsa|id_ed25519|\\.env$|\\.aws/|credentials|\\.gnupg/|\\.netrc"
+        message: "Reading sensitive file blocked"
+
+  - name: block-system-file-read
+    description: "Block reading system-sensitive files"
+    priority: 89
+    tools:
+      - "read_file"
+      - "view_file"
+      - "cat"
+    action: DENY
+    rules:
+      - argument: path
+        not_prefix:
+          - "/etc/shadow"
+          - "/etc/passwd"
+          - "/etc/sudoers"
+          - "/proc/kcore"
+        # This rule uses not_prefix inverted — it BLOCKS reads to these paths.
+        # Actually, we want to use pattern for this:
+        pattern: "^/(etc/shadow|etc/sudoers|proc/kcore)"
+        message: "System file access blocked"
+
+  # ── Network security ────────────────────────────────────────────────
+  - name: block-internal-network
+    description: "Block access to internal network IPs"
+    priority: 80
+    tools:
+      - "http_request"
+      - "fetch"
+      - "curl"
+      - "wget"
+    action: DENY
+    rules:
+      - argument: url
+        pattern: "https?://(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0)"
+        message: "Internal network access blocked"
+
+  - name: block-data-exfiltration
+    description: "Block common data exfiltration patterns"
+    priority: 79
+    tools:
+      - "http_request"
+      - "fetch"
+      - "curl"
+    action: DENY
+    rules:
+      - argument: url
+        pattern: "webhook\\.site|requestbin|pipedream|ngrok|burpcollaborator"
+        message: "Potential data exfiltration blocked"
+
+  # ── Logging ─────────────────────────────────────────────────────────
+  - name: log-file-writes
+    description: "Log all file write operations"
+    priority: 10
+    tools:
+      - "write_file"
+      - "write_to_file"
+      - "create_file"
+      - "replace_file_content"
+    action: LOG
+
+  - name: log-shell-commands
+    description: "Log all shell command execution"
+    priority: 10
+    tools:
+      - "run_command"
+      - "shell_.*"
+      - "execute_command"
+    action: LOG

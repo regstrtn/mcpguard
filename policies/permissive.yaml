@@ -1,0 +1,13 @@
+# mcpguard permissive policy
+# Log-only mode. Nothing is blocked. Good for auditing before enforcing.
+
+version: "1"
+default_action: ALLOW
+
+policies:
+  - name: log-everything
+    description: "Log all tool calls without blocking"
+    priority: 0
+    tools:
+      - ".*"
+    action: LOG
