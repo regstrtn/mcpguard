@@ -41,9 +41,9 @@ dev = [
 mcpguard = "mcpguard.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/moluqman/mcpguard"
-Documentation = "https://github.com/moluqman/mcpguard#readme"
-Issues = "https://github.com/moluqman/mcpguard/issues"
+Homepage = "https://github.com/regstrtn/mcpguard"
+Documentation = "https://github.com/regstrtn/mcpguard#readme"
+Issues = "https://github.com/regstrtn/mcpguard/issues"
 
 [tool.ruff]
 target-version = "py310"
