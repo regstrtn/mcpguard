@@ -1,0 +1,89 @@
+# mcpguard strict policy
+# Maximum security — deny by default. Only explicitly allowed operations proceed.
+# Use when running untrusted or unknown MCP servers.
+
+version: "1"
+default_action: DENY
+
+policies:
+  # ── Explicit allows ──────────────────────────────────────────────────
+  - name: allow-safe-reads
+    description: "Allow reading files in workspace only"
+    priority: 100
+    tools:
+      - "read_file"
+      - "view_file"
+    action: APPROVE
+    rules:
+      - argument: path
+        not_prefix:
+          - "/etc/"
+          - "/root/"
+          - "/proc/"
+          - "/sys/"
+        not_contains:
+          - ".ssh"
+          - ".env"
+          - ".aws"
+          - "credentials"
+          - "secret"
+          - "private_key"
+          - ".gnupg"
+
+  - name: allow-safe-commands
+    description: "Allow only non-destructive shell commands with approval"
+    priority: 90
+    tools:
+      - "run_command"
+      - "shell_.*"
+      - "execute_command"
+    action: APPROVE
+    rules:
+      - argument: command
+        not_pattern: "rm\\s+-r|rm\\s+-f|mkfs|dd\\s+if=|shutdown|reboot|halt|init\\s+0|chmod\\s+777|chown\\s+root|passwd|visudo"
+        max_length: 500
+
+  # ── Hard blocks ──────────────────────────────────────────────────────
+  - name: block-destructive-shell
+    description: "Unconditionally block destructive shell commands"
+    priority: 200
+    tools:
+      - "run_command"
+      - "shell_.*"
+      - "execute_command"
+    action: DENY
+    rules:
+      - argument: command
+        pattern: "rm\\s+-rf\\s+/|mkfs|dd\\s+if=|shutdown|reboot|:(){ :|:& };:|curl\\s+.*?\\|\\s*(bash|sh|python)|wget\\s+.*?\\|\\s*(bash|sh|python)"
+        message: "Destructive command unconditionally blocked"
+
+  - name: block-all-network
+    description: "Block all network access"
+    priority: 199
+    tools:
+      - "http_request"
+      - "fetch"
+      - "curl"
+      - "wget"
+    action: DENY
+
+  - name: block-sensitive-files
+    description: "Block reading sensitive files"
+    priority: 198
+    tools:
+      - "read_file"
+      - "view_file"
+      - "cat"
+    action: DENY
+    rules:
+      - argument: path
+        pattern: "\\.ssh/|id_rsa|id_ed25519|\\.env$|\\.aws/|credentials|\\.gnupg/|\\.netrc|\\.kube/config"
+        message: "Sensitive file access blocked"
+
+  # ── Logging ─────────────────────────────────────────────────────────
+  - name: log-all-activity
+    description: "Log every tool call"
+    priority: 1
+    tools:
+      - ".*"
+    action: LOG

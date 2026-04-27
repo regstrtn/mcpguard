@@ -56,7 +56,7 @@ async def test_mcp_guard_middleware_deny(mock_policy_engine, mock_audit_logger, 
         await middleware.on_call_tool(mock_middleware_context, call_next)
 
     # Assertions
-    assert "Blocked by policy 'block-test'" in str(exc_info.value)
+    assert "denied by policy 'block-test'" in str(exc_info.value)
     mock_audit_logger.log.assert_called_once()
     call_next.assert_not_called()
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 from typing import Any
 
@@ -32,6 +33,15 @@ class McpProxy:
         self.audit_logger = audit_logger
         self._process: asyncio.subprocess.Process | None = None
         self.approval_handler = ApprovalHandler()
+        # Regex patterns for secret detection in responses
+        self._secret_patterns = [
+            (r"AKIA[0-9A-Z]{16}", "AWS Access Key"),
+            (r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----", "Private Key"),
+            (r"ghp_[A-Za-z0-9_]{36}", "GitHub Token"),
+            (r"sk-[A-Za-z0-9]{48}", "OpenAI API Key"),
+            (r"xox[bpras]-[A-Za-z0-9-]+", "Slack Token"),
+            (r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", "JWT Token"),
+        ]
 
     async def start(self) -> None:
         """Start the upstream server and begin proxying."""
@@ -89,7 +99,8 @@ class McpProxy:
             line = await self._process.stdout.readline()
             if not line:
                 break
-            # TODO (Day 4): response scanning for leaked secrets
+            # Scan response for leaked secrets
+            self._scan_response_for_secrets(line.decode("utf-8", errors="replace"))
             sys.stdout.buffer.write(line)
             sys.stdout.buffer.flush()
 
@@ -171,8 +182,17 @@ class McpProxy:
             # If approved, return None to forward to upstream
             return None
 
-        # Allow / Log continue to upstream
-        return None
-
         # ALLOW or LOG — forward to upstream
         return None
+
+    def _scan_response_for_secrets(self, raw: str) -> None:
+        """Scan a response string for leaked secrets and log warnings."""
+        for pattern, label in self._secret_patterns:
+            if re.search(pattern, raw):
+                self.audit_logger.log(
+                    tool="_response_scan",
+                    arguments={"detected": label},
+                    action="DENY",
+                    matched_policy="response-secret-scan",
+                    reason=f"Potential {label} detected in upstream response",
+                )

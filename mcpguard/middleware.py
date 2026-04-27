@@ -61,7 +61,11 @@ class McpGuardMiddleware(Middleware):
 
         if result.action == Action.DENY:
             from mcpguard.exceptions import McpGuardDenied  # Avoid circular import
-            raise McpGuardDenied(f"Blocked by policy '{result.matched_policy}': {result.reason}")
+            raise McpGuardDenied(
+                tool=tool_name,
+                policy=result.matched_policy or "unknown",
+                reason=result.reason or "Denied by policy",
+            )
 
         if result.action == Action.APPROVE:
             # For FastMCP, interactive TTY prompts might hijack the server stream if running on a terminal,
@@ -76,11 +80,21 @@ class McpGuardMiddleware(Middleware):
                              tool=tool_name, arguments=arguments, action="APPROVE_NO",
                              matched_policy=result.matched_policy, reason="User denied approval"
                          )
-                    raise McpGuardDenied("User denied approval for tool call")
+                    from mcpguard.exceptions import McpGuardDenied
+                    raise McpGuardDenied(
+                        tool=tool_name,
+                        policy=result.matched_policy or "unknown",
+                        reason="User denied approval",
+                    )
             except Exception as e:
                 # Fallback to deny if prompt fails
                 logger.error(f"Approval prompt failed: {e}")
-                raise McpGuardDenied(f"Approval prompt failed: {e}")
+                from mcpguard.exceptions import McpGuardDenied
+                raise McpGuardDenied(
+                    tool=tool_name,
+                    policy=result.matched_policy or "unknown",
+                    reason=f"Approval prompt failed: {e}",
+                )
 
         return await call_next(context)
 
