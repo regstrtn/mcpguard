@@ -27,10 +27,12 @@ class McpProxy:
         upstream_command: list[str],
         policy_engine: PolicyEngine,
         audit_logger: AuditLogger,
+        shadow_mode: bool = False,
     ):
         self.upstream_command = upstream_command
         self.policy_engine = policy_engine
         self.audit_logger = audit_logger
+        self.shadow_mode = shadow_mode
         self._process: asyncio.subprocess.Process | None = None
         self.approval_handler = ApprovalHandler()
         # Regex patterns for secret detection in responses
@@ -146,6 +148,16 @@ class McpProxy:
         )
 
         if result.action == Action.DENY:
+            if self.shadow_mode:
+                # Shadow mode: log as SHADOW_DENY but forward anyway
+                self.audit_logger.log(
+                    tool=tool_name,
+                    arguments=arguments,
+                    action="SHADOW_DENY",
+                    matched_policy=result.matched_policy,
+                    reason=result.reason,
+                )
+                return None
             return json.dumps({
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -159,6 +171,16 @@ class McpProxy:
             })
 
         if result.action == Action.APPROVE:
+            if self.shadow_mode:
+                # Shadow mode: log as SHADOW_APPROVE but forward anyway
+                self.audit_logger.log(
+                    tool=tool_name,
+                    arguments=arguments,
+                    action="SHADOW_APPROVE",
+                    matched_policy=result.matched_policy,
+                    reason=result.reason,
+                )
+                return None
             approved = await self.approval_handler.request_approval(
                 tool=tool_name, arguments=arguments, reason=result.reason
             )

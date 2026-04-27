@@ -1,11 +1,12 @@
 """mcpguard.cli — Command-line interface.
 
 Commands:
-  mcpguard run --config policy.yaml -- <upstream_command>
-  mcpguard validate --config policy.yaml
+  mcpguard run --config mcpguard.yaml -- <upstream_command>
+  mcpguard run --shadow -- <upstream_command>   (log only, never block)
+  mcpguard validate --config mcpguard.yaml
   mcpguard stats --log mcpguard_audit.jsonl
   mcpguard init
-  mcpguard test --config policy.yaml --tool <name> --args '{"key": "val"}'
+  mcpguard test --config mcpguard.yaml --tool <name> --args '{"key": "val"}'
 """
 
 from __future__ import annotations
@@ -152,20 +153,12 @@ def stats(log: str, html: str | None) -> None:
 
 @main.command()
 @click.option("--output", "-o", default="mcpguard.yaml", help="Output file path")
-@click.option(
-    "--preset",
-    "-p",
-    type=click.Choice(["default", "strict", "permissive"]),
-    default="default",
-    help="Policy preset",
-)
-def init(output: str, preset: str) -> None:
+def init(output: str) -> None:
     """Generate a starter policy file."""
-    presets_dir = Path(__file__).parent.parent / "policies"
-    source = presets_dir / f"{preset}.yaml"
+    source = Path(__file__).parent.parent / "mcpguard.yaml"
 
     if not source.exists():
-        console.print(f"[red]❌ Preset '{preset}' not found[/red]")
+        console.print(f"[red]❌ Bundled mcpguard.yaml not found[/red]")
         sys.exit(1)
 
     dest = Path(output)
@@ -174,18 +167,20 @@ def init(output: str, preset: str) -> None:
             return
 
     dest.write_text(source.read_text())
-    console.print(f"[green]✅ Created {dest} (preset: {preset})[/green]")
+    console.print(f"[green]✅ Created {dest}[/green]")
     console.print(f"   Edit the file, then run: mcpguard validate --config {dest}")
 
 
 @main.command()
 @click.option("--config", "-c", default="mcpguard.yaml", help="Policy file path")
 @click.option("--log", "-l", default="mcpguard_audit.jsonl", help="Audit log path")
+@click.option("--shadow", is_flag=True, default=False, help="Shadow mode: log everything, block nothing")
 @click.argument("upstream_command", nargs=-1, required=True)
-def run(config: str, log: str, upstream_command: tuple[str, ...]) -> None:
+def run(config: str, log: str, shadow: bool, upstream_command: tuple[str, ...]) -> None:
     """Start the mcpguard proxy in front of an MCP server.
 
-    Usage: mcpguard run --config policy.yaml -- npx @anthropic/mcp-filesystem /tmp
+    Usage: mcpguard run --config mcpguard.yaml -- npx @anthropic/mcp-filesystem /tmp
+    Shadow: mcpguard run --shadow -- npx @anthropic/mcp-filesystem /tmp
     """
     # Import here to avoid circular / heavy imports at CLI load time
     import asyncio
@@ -203,9 +198,13 @@ def run(config: str, log: str, upstream_command: tuple[str, ...]) -> None:
         upstream_command=list(upstream_command),
         policy_engine=engine,
         audit_logger=audit_logger,
+        shadow_mode=shadow,
     )
 
-    console.print(f"[bold]mcpguard[/bold] starting proxy")
+    mode_label = "[yellow]SHADOW[/yellow]" if shadow else "[green]ENFORCE[/green]"
+    console.print(f"[bold]mcpguard[/bold] starting proxy ({mode_label})")
+    if shadow:
+        console.print(f"  ⚡ Shadow mode: all calls logged, nothing blocked")
     console.print(f"  Config:   {config}")
     console.print(f"  Upstream: {' '.join(upstream_command)}")
     console.print(f"  Policies: {len(engine.policies)} loaded")

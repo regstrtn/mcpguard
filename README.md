@@ -1,5 +1,10 @@
 # mcpguard 🛡️
 
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
+[![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen.svg)]()
+[![PyPI](https://img.shields.io/badge/pypi-mcpguard-orange.svg)](https://pypi.org/project/mcpguard/)
+
 **A firewall for MCP-based AI agents** — intercepts and evaluates tool calls against YAML policies before they reach your servers.
 
 ```
@@ -13,14 +18,14 @@ Stop your AI agent from running `rm -rf /`, reading your `.ssh` keys, or exfiltr
 
 ## Features
 
-- **Policy Engine** — YAML-defined rules with regex, prefix, and contains matching. First-match-wins priority.
-- **Stdio Proxy** — Transparent man-in-the-middle for any MCP server. Zero code changes needed.
+- **YAML Policies** — Simple rules with regex, prefix, and contains matching. No DSL to learn.
+- **Stdio Proxy** — Transparent man-in-the-middle for any MCP server. Zero code changes.
+- **Shadow Mode** — Log everything without blocking. See what *would* be blocked before enforcing.
 - **FastMCP Middleware** — Native integration for FastMCP servers via `McpGuardMiddleware`.
-- **Tamper-Evident Audit Log** — JSON-lines with DPR hash chain. Every tool call recorded.
+- **Tamper-Evident Audit Log** — JSON-lines with hash chain. Every tool call recorded.
 - **Human Approval** — Interactive `APPROVE` action via `/dev/tty` (doesn't interfere with MCP stdio).
 - **Response Scanning** — Detects leaked secrets (AWS keys, private keys, tokens) in upstream responses.
 - **Stats Dashboard** — Rich terminal tables + HTML export with Chart.js visualizations.
-- **Policy Presets** — `default`, `strict`, and `permissive` built-in policies.
 
 ## Quick Start
 
@@ -28,11 +33,14 @@ Stop your AI agent from running `rm -rf /`, reading your `.ssh` keys, or exfiltr
 # Install
 pip install mcpguard
 
-# Generate a starter config
+# Generate starter config
 mcpguard init
 
 # Run in front of any MCP server
-mcpguard run --config mcpguard.yaml -- npx @anthropic/mcp-filesystem /tmp
+mcpguard run -- npx @anthropic/mcp-filesystem /tmp
+
+# Or start in shadow mode first (log only, no blocking)
+mcpguard run --shadow -- npx @anthropic/mcp-filesystem /tmp
 ```
 
 ## Usage
@@ -42,11 +50,11 @@ mcpguard run --config mcpguard.yaml -- npx @anthropic/mcp-filesystem /tmp
 Works with any MCP-compatible client (Claude Code, Cursor, Jetski):
 
 ```bash
-# Claude Code filesystem server
+# Enforce policies
 mcpguard run --config mcpguard.yaml -- npx @anthropic/mcp-filesystem /home/user/project
 
-# Any custom MCP server
-mcpguard run --config policy.yaml --log audit.jsonl -- python my_server.py
+# Shadow mode: log everything, block nothing
+mcpguard run --shadow -- npx @anthropic/mcp-filesystem /home/user/project
 ```
 
 Configure in Claude Code's `.claude.json`:
@@ -59,6 +67,21 @@ Configure in Claude Code's `.claude.json`:
     }
   }
 }
+```
+
+### Shadow Mode
+
+Start in shadow mode to see what mcpguard *would* block without actually blocking anything. Tool calls that would be denied are logged as `SHADOW_DENY` instead — your agent keeps working normally.
+
+```bash
+# Watch what would happen
+mcpguard run --shadow -- python my_server.py
+
+# Review the log
+mcpguard stats --log mcpguard_audit.jsonl
+
+# When satisfied, switch to enforcement
+mcpguard run -- python my_server.py
 ```
 
 ### FastMCP Middleware
@@ -74,62 +97,50 @@ guard = McpGuardMiddleware.from_yaml("mcpguard.yaml")
 mcp.add_middleware(guard)
 ```
 
-Or wrap an existing server:
-
-```python
-from mcpguard.middleware import wrap_fastmcp
-wrap_fastmcp(mcp, policy_path="mcpguard.yaml")
-```
-
 ### Test a Policy
 
 ```bash
 # Test a deny case
-mcpguard test --config mcpguard.yaml --tool run_command --args '{"command": "rm -rf /"}'
-# → DENIED by policy 'block-destructive-shell'
+mcpguard test --tool run_command --args '{"command": "rm -rf /"}'
+# → DENIED by policy 'block-destructive-commands'
 
 # Test an allow case
-mcpguard test --config mcpguard.yaml --tool run_command --args '{"command": "ls -la"}'
-# → ALLOWED (no matching deny policy)
+mcpguard test --tool run_command --args '{"command": "ls -la"}'
+# → LOG (logged, not blocked)
 ```
 
-### Validate Policies
+### Validate & Stats
 
 ```bash
-mcpguard validate --config mcpguard.yaml
-# ✅ Valid! 9 policies loaded
-```
-
-### View Audit Stats
-
-```bash
-# Terminal dashboard
-mcpguard stats --log mcpguard_audit.jsonl
-
-# HTML export
-mcpguard stats --log mcpguard_audit.jsonl --html report.html
+mcpguard validate                          # Validate default mcpguard.yaml
+mcpguard stats --log mcpguard_audit.jsonl  # Terminal dashboard
+mcpguard stats --log audit.jsonl --html report.html  # HTML export
 ```
 
 ## Writing Policies
 
-Policies are YAML files with a simple structure:
+Policies are a single YAML file — `mcpguard.yaml`:
 
 ```yaml
 version: "1"
-default_action: ALLOW  # ALLOW, DENY, APPROVE, or LOG
+default_action: ALLOW
 
 policies:
-  - name: block-destructive-shell
+  - name: block-destructive-commands
     description: "Block rm -rf, mkfs, etc."
     priority: 100
-    tools:
-      - "run_command"
-      - "shell_.*"    # regex patterns supported
+    tools: ["run_command", "shell_.*"]
     action: DENY
     rules:
       - argument: command
         pattern: "rm\\s+-rf|mkfs|dd\\s+if="
         message: "Destructive command blocked"
+
+  - name: log-file-writes
+    description: "Log all file modifications"
+    priority: 10
+    tools: ["write_file", "create_file"]
+    action: LOG
 ```
 
 ### Rule Types
@@ -137,12 +148,12 @@ policies:
 | Rule | Description | Example |
 |------|-------------|---------|
 | `pattern` | Regex match | `pattern: "\\.ssh/"` |
-| `not_pattern` | Regex must NOT match | `not_pattern: "rm\\s+-r"` |
-| `prefix` | String prefix match | `prefix: ["/home/user/"]` |
-| `not_prefix` | String must NOT start with | `not_prefix: ["/etc/"]` |
+| `not_pattern` | Must NOT match regex | `not_pattern: "rm\\s+-r"` |
+| `prefix` | String starts with | `prefix: ["/home/user/"]` |
+| `not_prefix` | Must NOT start with | `not_prefix: ["/etc/"]` |
 | `contains` | Substring match | `contains: ["password"]` |
-| `not_contains` | Must NOT contain substring | `not_contains: [".env"]` |
-| `max_length` | Maximum argument length | `max_length: 500` |
+| `not_contains` | Must NOT contain | `not_contains: [".env"]` |
+| `max_length` | Max argument length | `max_length: 500` |
 
 ### Actions
 
@@ -153,108 +164,59 @@ policies:
 | `APPROVE` | Interactive human approval via `/dev/tty` |
 | `LOG` | Forward but log the call |
 
-### Priority
+Rules sorted by `priority` (highest first). First match wins. If nothing matches, `default_action` applies.
 
-Rules are sorted by `priority` (highest first). First matching rule wins.
-If no rule matches, `default_action` is used.
-
-## Built-in Policy Presets
-
-| Preset | Default Action | Description |
-|--------|---------------|-------------|
-| `default.yaml` | ALLOW | Block known-dangerous patterns, log writes and shell |
-| `strict.yaml` | DENY | Deny everything by default, require explicit allows/approvals |
-| `permissive.yaml` | ALLOW | Log-only mode, no blocking |
+See [docs/policy-reference.md](docs/policy-reference.md) for the full language reference.
 
 ## Architecture
 
 ```
-┌────────────────────────────────────────┐
-│             AI Agent / Client          │
-│         (Claude, Cursor, etc.)         │
-└─────────────────┬──────────────────────┘
-                  │ JSON-RPC over stdio
-                  ▼
-┌────────────────────────────────────────┐
-│              mcpguard proxy            │
-│  ┌──────────┐  ┌──────────────────┐    │
-│  │ Policy   │  │  Audit Logger    │    │
-│  │ Engine   │  │  (hash-chained)  │    │
-│  └──────────┘  └──────────────────┘    │
-│  ┌──────────┐  ┌──────────────────┐    │
-│  │ Response │  │  Approval        │    │
-│  │ Scanner  │  │  Handler (/tty)  │    │
-│  └──────────┘  └──────────────────┘    │
-└─────────────────┬──────────────────────┘
-                  │ JSON-RPC over stdio
-                  ▼
-┌────────────────────────────────────────┐
-│           MCP Server (upstream)        │
-│      (filesystem, shell, API, etc.)    │
-└────────────────────────────────────────┘
-```
-
-## Project Structure
-
-```
-mcpguard/
-├── mcpguard/
-│   ├── __init__.py          # Package metadata
-│   ├── __main__.py          # python -m mcpguard entry point
-│   ├── cli.py               # Click CLI (run, validate, test, init, stats)
-│   ├── policy.py            # PolicyEngine with first-match-wins evaluation
-│   ├── proxy.py             # Stdio proxy with response scanning
-│   ├── middleware.py         # FastMCP middleware integration
-│   ├── audit.py             # JSON-lines logger with DPR hash chain
-│   ├── approval.py          # Interactive TTY approval handler
-│   ├── dashboard.py         # HTML stats dashboard (Chart.js)
-│   └── exceptions.py        # Custom exceptions
-├── policies/
-│   ├── default.yaml          # Sensible defaults
-│   ├── strict.yaml           # Deny-by-default
-│   └── permissive.yaml       # Log-only
-├── tests/
-│   ├── test_policy.py        # 57 policy engine tests
-│   ├── test_middleware.py     # 4 FastMCP middleware tests
-│   ├── test_audit.py          # 21 audit logger tests
-│   └── test_e2e.py            # 10 E2E integration tests
-├── examples/
-│   ├── claude-code.md         # Claude Code integration guide
-│   ├── cursor.md              # Cursor integration guide
-│   ├── antigravity.md         # Antigravity/Jetski integration guide
-│   └── simulate_client.py     # Test client simulator
-├── docs/
-│   ├── mcpguard_build_spec.md # Full project specification
-│   └── policy-reference.md    # Policy language reference
-└── pyproject.toml
+┌─────────────────────────────────────────┐
+│            AI Agent / Client            │
+│        (Claude, Cursor, Jetski)         │
+└──────────────────┬──────────────────────┘
+                   │ JSON-RPC over stdio
+                   ▼
+┌─────────────────────────────────────────┐
+│             mcpguard proxy              │
+│  ┌──────────┐  ┌───────────────────┐    │
+│  │ Policy   │  │  Audit Logger     │    │
+│  │ Engine   │  │  (hash-chained)   │    │
+│  └──────────┘  └───────────────────┘    │
+│  ┌──────────┐  ┌───────────────────┐    │
+│  │ Response │  │  Approval Handler │    │
+│  │ Scanner  │  │  (/dev/tty)       │    │
+│  └──────────┘  └───────────────────┘    │
+└──────────────────┬──────────────────────┘
+                   │ JSON-RPC over stdio
+                   ▼
+┌─────────────────────────────────────────┐
+│          MCP Server (upstream)          │
+│     (filesystem, shell, API, etc.)      │
+└─────────────────────────────────────────┘
 ```
 
 ## Development
 
 ```bash
-# Clone
 git clone https://github.com/regstrtn/mcpguard.git
 cd mcpguard
 
-# Create venv
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Run tests
 pytest tests/ -v
-
-# Lint
-ruff check .
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Roadmap
 
-- [ ] Rate limiting (`RATE_LIMIT` action with `max_calls` / `per_seconds`)
-- [ ] Expression language (`when: 'args["amount"] > 500'`) via expr-lang
-- [ ] ML-based anomaly detection for unusual tool call patterns
-- [ ] Async approval (`DEFER` action with file-based pending queue)
-- [ ] Multi-agent governance policies
+- [ ] Rate limiting (`RATE_LIMIT` action)
+- [ ] Expression language (`when: 'args["amount"] > 500'`)
+- [ ] ML-based anomaly detection
+- [ ] `mcpguard suggest` — auto-generate policies from audit logs
 
 ## License
 

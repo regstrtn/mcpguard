@@ -356,7 +356,7 @@ def test_cli_validate(policy_file):
 def test_cli_test_deny():
     """Test mcpguard test command with a deny result."""
     project_root = str(Path(__file__).parent.parent)
-    policy_path = str(Path(__file__).parent.parent / "policies" / "default.yaml")
+    policy_path = str(Path(__file__).parent.parent / "mcpguard.yaml")
     result = subprocess.run(
         [sys.executable, "-m", "mcpguard", "test",
          "--config", policy_path,
@@ -373,7 +373,7 @@ def test_cli_test_deny():
 def test_cli_test_allow():
     """Test mcpguard test command with an allow result."""
     project_root = str(Path(__file__).parent.parent)
-    policy_path = str(Path(__file__).parent.parent / "policies" / "default.yaml")
+    policy_path = str(Path(__file__).parent.parent / "mcpguard.yaml")
     result = subprocess.run(
         [sys.executable, "-m", "mcpguard", "test",
          "--config", policy_path,
@@ -425,3 +425,49 @@ def test_cli_init():
         assert result.returncode == 0
         combined = result.stdout + result.stderr
         assert "Created" in combined or os.path.exists(output)
+
+
+# ── Shadow mode tests ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_shadow_mode_logs_but_does_not_block(mock_upstream_server, policy_file):
+    """Shadow mode should log DENY as SHADOW_DENY but forward the call."""
+    from mcpguard.proxy import McpProxy
+
+    audit_log = tempfile.NamedTemporaryFile(delete=False, suffix=".jsonl").name
+    engine = PolicyEngine.from_yaml(policy_file)
+    audit_logger = AuditLogger(path=audit_log, also_stderr=False)
+
+    proxy = McpProxy(
+        upstream_command=[sys.executable, mock_upstream_server],
+        policy_engine=engine,
+        audit_logger=audit_logger,
+        shadow_mode=True,
+    )
+
+    proxy._process = await asyncio.create_subprocess_exec(
+        *proxy.upstream_command,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    # This call would be DENIED in normal mode
+    raw = json.dumps({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "shell", "arguments": {"command": "rm -rf /"}}
+    })
+
+    result = await proxy._handle_client_message(raw)
+    # Shadow mode: should NOT block (return None = forward)
+    assert result is None
+
+    # But it should be logged as SHADOW_DENY
+    content = Path(audit_log).read_text()
+    assert "SHADOW_DENY" in content
+
+    # Cleanup
+    proxy._process.terminate()
+    await proxy._process.wait()
+    os.unlink(audit_log)

@@ -1,0 +1,75 @@
+# mcpguard — default policy
+#
+# Permissive-by-default: lets your agent work normally while blocking
+# genuinely dangerous operations (data destruction, credential theft,
+# data exfiltration). When in doubt, we LOG rather than DENY.
+#
+# Generate this file:  mcpguard init
+# Validate this file:  mcpguard validate
+# Test a tool call:    mcpguard test --tool run_command --args '{"command": "rm -rf /"}'
+
+version: "1"
+default_action: ALLOW
+
+policies:
+  # ── Hard blocks (things that should NEVER happen) ──────────────────
+
+  - name: block-destructive-commands
+    description: "Block commands that destroy filesystems or reboot machines"
+    priority: 100
+    tools:
+      - "run_command"
+      - "shell_.*"
+      - "execute_command"
+    action: DENY
+    rules:
+      - argument: command
+        pattern: "rm\\s+-rf\\s+/|mkfs|dd\\s+if=|shutdown|reboot|init\\s+0|:(){ :|:& };:"
+        message: "Destructive command blocked"
+
+  - name: block-credential-theft
+    description: "Block reading SSH keys, .env files, and cloud credentials"
+    priority: 95
+    tools:
+      - "read_file"
+      - "view_file"
+      - "cat"
+    action: DENY
+    rules:
+      - argument: path
+        pattern: "\\.ssh/|id_rsa|id_ed25519|\\.env$|\\.aws/credentials|\\.gnupg/|\\.netrc"
+        message: "Credential file access blocked"
+
+  - name: block-data-exfiltration
+    description: "Block known data exfiltration endpoints"
+    priority: 90
+    tools:
+      - "http_request"
+      - "fetch"
+      - "curl"
+    action: DENY
+    rules:
+      - argument: url
+        pattern: "webhook\\.site|requestbin|pipedream|ngrok|burpcollaborator"
+        message: "Potential data exfiltration blocked"
+
+  # ── Soft logging (everything else is watched, not blocked) ─────────
+
+  - name: log-shell-commands
+    description: "Log all shell command execution for audit trail"
+    priority: 10
+    tools:
+      - "run_command"
+      - "shell_.*"
+      - "execute_command"
+    action: LOG
+
+  - name: log-file-writes
+    description: "Log all file modifications for audit trail"
+    priority: 10
+    tools:
+      - "write_file"
+      - "write_to_file"
+      - "create_file"
+      - "replace_file_content"
+    action: LOG
