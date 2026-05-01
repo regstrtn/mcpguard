@@ -15,16 +15,6 @@ class McpGuardDenied(McpGuardError):
         super().__init__(f"Tool '{tool}' denied by policy '{policy}': {reason}")
 
 
-class McpGuardRateLimited(McpGuardError):
-    """Raised when a tool call exceeds rate limits."""
-
-    def __init__(self, tool: str, policy: str, reason: str):
-        self.tool = tool
-        self.policy = policy
-        self.reason = reason
-        super().__init__(f"Tool '{tool}' rate limited by policy '{policy}': {reason}")
-
-
 class PolicyLoadError(McpGuardError):
     """Raised when a policy file cannot be loaded or parsed."""
 

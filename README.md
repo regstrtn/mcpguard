@@ -213,7 +213,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Roadmap
 
-- [ ] Rate limiting (`RATE_LIMIT` action)
 - [ ] Expression language (`when: 'args["amount"] > 500'`)
 - [ ] ML-based anomaly detection
 - [ ] `mcpguard suggest` — auto-generate policies from audit logs
