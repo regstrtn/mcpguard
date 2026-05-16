@@ -166,7 +166,7 @@ def generate_html_dashboard(stats_data: dict[str, Any], output_path: str | Path)
                         '#cf222e', // DENY
                         '#0969da', // LOG
                         '#8250df', // APPROVE
-                        '#efb034'  # UNKNOWN
+                        '#efb034'  // OTHER
                     ],
                 }]
             },

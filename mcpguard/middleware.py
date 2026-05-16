@@ -13,6 +13,7 @@ except ImportError:
 
 from mcpguard.policy import PolicyEngine, Action
 from mcpguard.audit import AuditLogger, AuditEvent
+from mcpguard.exceptions import McpGuardDenied
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,6 @@ class McpGuardMiddleware(Middleware):
             )
 
         if result.action == Action.DENY:
-            from mcpguard.exceptions import McpGuardDenied  # Avoid circular import
             raise McpGuardDenied(
                 tool=tool_name,
                 policy=result.matched_policy or "unknown",
@@ -80,7 +80,6 @@ class McpGuardMiddleware(Middleware):
                              tool=tool_name, arguments=arguments, action="APPROVE_NO",
                              matched_policy=result.matched_policy, reason="User denied approval"
                          )
-                    from mcpguard.exceptions import McpGuardDenied
                     raise McpGuardDenied(
                         tool=tool_name,
                         policy=result.matched_policy or "unknown",
@@ -89,7 +88,6 @@ class McpGuardMiddleware(Middleware):
             except Exception as e:
                 # Fallback to deny if prompt fails
                 logger.error(f"Approval prompt failed: {e}")
-                from mcpguard.exceptions import McpGuardDenied
                 raise McpGuardDenied(
                     tool=tool_name,
                     policy=result.matched_policy or "unknown",

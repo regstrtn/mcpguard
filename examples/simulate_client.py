@@ -1,21 +1,33 @@
-import subprocess
+#!/usr/bin/env python3
+"""Simulate an MCP client session through mcpguard.
+
+Starts mcpguard proxy with `cat` as a loopback server, sends a
+safe and a malicious tool call, and prints the results.
+"""
+
 import json
+import subprocess
+import sys
 import time
+
 
 def simulate_mcp_session():
     print("🚀 [Simulating MCP Client Session]")
     print("---")
-    
-    # 1. Start the mcpguard proxy, which wraps a loopback process ('cat')
+
+    # Start mcpguard proxy wrapping `cat` as a loopback echo server
     process = subprocess.Popen(
-        ["python3", "-m", "mcpguard.cli", "run", "--config", "policies/default.yaml", "--", "cat"],
+        [sys.executable, "-m", "mcpguard", "run", "--config", "mcpguard.yaml", "--", "cat"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True
+        text=True,
     )
 
-    # 2. Simulate an initialize handshake (MCP setup phase)
+    # Give the proxy a moment to start
+    time.sleep(0.5)
+
+    # 1. Send an initialize handshake (passes through untouched)
     init_msg = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -23,48 +35,65 @@ def simulate_mcp_session():
         "params": {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "TestRunner", "version": "1.0"}
-        }
+            "clientInfo": {"name": "TestRunner", "version": "1.0"},
+        },
     }
-    
-    # 3. Simulate a Malicious Tool Call (Absolute Traversal on a filesystem)
-    traversal_call = {
+
+    # 2. Send a malicious tool call (should be DENIED)
+    malicious_call = {
         "jsonrpc": "2.0",
         "id": 2,
-        "method": "call_tool",
+        "method": "tools/call",
         "params": {
             "name": "read_file",
-            "arguments": {
-                "path": "../../../../../../../etc/passwd"
-            }
-        }
+            "arguments": {"path": "/home/user/.ssh/id_rsa"},
+        },
+    }
+
+    # 3. Send a safe tool call (should be forwarded)
+    safe_call = {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "read_file",
+            "arguments": {"path": "/tmp/notes.txt"},
+        },
     }
 
     print("📤 Sending 'initialize' handshake...")
     process.stdin.write(json.dumps(init_msg) + "\n")
     process.stdin.flush()
-    time.sleep(0.5)
+    time.sleep(0.3)
 
-    print("📤 Sending malicious 'call_tool' request (Targeting: '../../etc/passwd')...")
-    process.stdin.write(json.dumps(traversal_call) + "\n")
+    print("📤 Sending malicious tool call (reading ~/.ssh/id_rsa)...")
+    process.stdin.write(json.dumps(malicious_call) + "\n")
     process.stdin.flush()
-    
-    print("\n📩 [Intercepted Message Output]:")
+    time.sleep(0.3)
+
+    print("📤 Sending safe tool call (reading /tmp/notes.txt)...")
+    process.stdin.write(json.dumps(safe_call) + "\n")
+    process.stdin.flush()
+    time.sleep(0.3)
+
+    print("\n📩 [Responses]:")
     print("---")
-    while True:
+
+    # Read available responses
+    for _ in range(3):
         output = process.stdout.readline()
-        if output:
-            parsed = json.loads(output.strip())
-            # Print pretty response
-            print(json.dumps(parsed, indent=2))
-            if parsed.get("id") == 2:  # If we got response to our call
-                 if "error" in parsed:
-                     print("\n✅ Result: mcpguard SUCCESSFULLY blocked the relative traversal request!")
-                 break
-        else:
+        if not output:
             break
+        parsed = json.loads(output.strip())
+        req_id = parsed.get("id")
+        if "error" in parsed:
+            print(f"  ❌ Request #{req_id}: BLOCKED — {parsed['error']['message']}")
+        else:
+            print(f"  ✅ Request #{req_id}: Forwarded")
 
     process.terminate()
+    print("\n🏁 Simulation complete. Check mcpguard_audit.jsonl for the audit trail.")
+
 
 if __name__ == "__main__":
     simulate_mcp_session()

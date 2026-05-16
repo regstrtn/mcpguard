@@ -1,1 +1,26 @@
-docs/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# mcpguard runtime
+mcpguard_audit.jsonl
+mcpguard.kill
+*.html
+
+# OS
+.DS_Store
+Thumbs.db

@@ -65,26 +65,6 @@ policies:
         pattern: "\\.ssh/|id_rsa|id_ed25519|\\.env$|\\.aws/|credentials|\\.gnupg/|\\.netrc"
         message: "Reading sensitive file blocked"
 
-  - name: block-system-file-read
-    description: "Block reading system-sensitive files"
-    priority: 89
-    tools:
-      - "read_file"
-      - "view_file"
-      - "cat"
-    action: DENY
-    rules:
-      - argument: path
-        not_prefix:
-          - "/etc/shadow"
-          - "/etc/passwd"
-          - "/etc/sudoers"
-          - "/proc/kcore"
-        # This rule uses not_prefix inverted — it BLOCKS reads to these paths.
-        # Actually, we want to use pattern for this:
-        pattern: "^/(etc/shadow|etc/sudoers|proc/kcore)"
-        message: "System file access blocked"
-
   # ── Network security ────────────────────────────────────────────────
   - name: block-internal-network
     description: "Block access to internal network IPs"
